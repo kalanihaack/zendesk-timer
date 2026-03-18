@@ -73,7 +73,6 @@ function updateAlertUI() {
     };
 }
 
-// --- CORE ---
 function getCurrentTicketInfo() {
     const url = window.location.href;
     const ticketMatch = url.match(/\/tickets\/(\d+)/);
@@ -99,27 +98,22 @@ function getCurrentTicketInfo() {
     return entityId ? { id: entityId, protocol: protocolText, name: customerName } : null;
 }
 
-// --- CHECAGEM DE STATUS NO CABEÇALHO ---
 function checkActiveTicketStatus() {
     const info = getCurrentTicketInfo();
-    // Só prossegue se conseguirmos ver a ID do ticket e se ele estiver sendo monitorado
     if (!info || !chats[info.id]) return;
 
-    // Busca DIRETAMENTE pela classe oficial de status do Zendesk
     const statusBadges = document.querySelectorAll('.ticket_status_label');
     let shouldStopTimer = false;
 
     for (let badge of statusBadges) {
         const text = (badge.innerText || badge.textContent || "").trim().toLowerCase();
         
-        // Verifica se é Resolvido ou Em espera
         if (text === "resolvido" || text === "em espera") {
             shouldStopTimer = true;
-            break; // Já achou, não precisa olhar os outros
+            break;
         }
     }
 
-    // Se achou a badge com o status, encerra o monitoramento
     if (shouldStopTimer) {
         console.log(`%c[Zendesk Debug] Ticket ${info.protocol} resolvido/em espera. Timer cancelado.`, "color: #28a745; font-weight: bold;");
         stopWaitingForCustomer(info.id);
@@ -156,12 +150,9 @@ function stopWaitingForCustomer(chatId) {
     }
 }
 
-// Verifica o tempo e o status a cada 1 segundo
 setInterval(() => {
-    // 1. Antes de qualquer coisa, verifica se o ticket da tela ativa foi colocado em Espera/Resolvido
     checkActiveTicketStatus();
 
-    // 2. Roda a contagem do tempo
     const now = new Date();
     let changed = false;
     for (let id in chats) {
@@ -177,7 +168,6 @@ setInterval(() => {
     if (changed) updateAlertUI();
 }, 1000);
 
-// Observa mensagens novas
 const observer = new MutationObserver((mutations) => {
     const isRelevant = mutations.some(m => 
         (m.target instanceof HTMLElement && m.target.closest('[data-test-id="omni-log-container"]')) || 
