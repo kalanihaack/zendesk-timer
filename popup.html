@@ -5,16 +5,27 @@
     <style>
         body { width: 250px; font-family: Arial, sans-serif; padding: 15px; }
         h3 { color: #006aff; margin-top: 0; }
-        .btn-reset { width: 100%; padding: 10px; background-color: #ff4d4d; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; }
+        .btn-reset { width: 100%; padding: 10px; background-color: #ff4d4d; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; margin-top: 10px; }
         .btn-reset:hover { background-color: #cc0000; }
-        .status { margin-top: 10px; font-size: 12px; color: #666; }
+        .status { margin-top: 10px; font-size: 12px; color: #666; text-align: center; }
+        .toggle-box { background: #f0f4f8; border: 1px solid #d8dcde; padding: 10px; border-radius: 4px; margin-top: 10px; }
+        .toggle-box label { cursor: pointer; font-weight: bold; color: #2f3941; display: flex; align-items: center; font-size: 13px; }
+        .toggle-box input { margin-right: 8px; width: 15px; height: 15px; cursor: pointer; }
     </style>
 </head>
 <body>
     <h3>Zendesk Timer v1.0</h3>
-    <p>Monitor de Inatividade de Clientes (5 minutos).</p>
+    <p style="font-size: 13px; color: #444; margin-bottom: 5px;">Monitor de Inatividade.</p>
+    
+    <div class="toggle-box">
+        <label>
+            <input type="checkbox" id="timer-toggle"> ⏱️ Ativar Timer Curto (3 Min)
+        </label>
+    </div>
+
     <button id="clear-all" class="btn-reset">Zerar Todos os Monitores</button>
     <div class="status">Versão estável (Base v1.0)</div>
+    
     <script src="popup.js"></script>
 </body>
 </html>

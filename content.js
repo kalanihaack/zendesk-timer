@@ -1,14 +1,42 @@
-
-const INACTIVITY_LIMIT = (4 * 60 * 1000) + (30 * 1000); // 4 minutos e 30 segundos
+let INACTIVITY_LIMIT = (4 * 60 * 1000) + (30 * 1000); // Padrão 4m 30s
 const DEBUG_LOG_INTERVAL = 10000; 
-const PROCESS_DELAY = 500; // Delay de 0.5 segundos para a pagina carregar
+const PROCESS_DELAY = 500; 
 
-// Variaveis Globais
-let chats = {}; // armazena os chats a serem monitoriados
-let processTimeout = null; // contador, iniciado em null
+let chats = {}; 
+let processTimeout = null; 
+
+// --- VERIFICAÇÃO INICIAL DO TIMER ---
+chrome.storage.local.get(['USE_SHORT_TIMER'], (result) => {
+    if (result.USE_SHORT_TIMER) {
+        INACTIVITY_LIMIT = 3 * 60 * 1000;
+        console.log("%c[Zendesk Debug] Iniciado com Timer de 3 MINUTOS", "color: purple; font-weight: bold;");
+    }
+});
+
+// --- COMUNICAÇÃO COM O POPUP ---
+chrome.storage.onChanged.addListener((changes, namespace) => {
+    if (namespace === 'local') {
+        if (changes.CLEAR_ALL && changes.CLEAR_ALL.newValue === true) {
+            chats = {};
+            const existingAlert = document.getElementById('zendesk-inactivity-alert');
+            if (existingAlert) existingAlert.remove();
+            console.log("%c[Zendesk Debug] Todos os monitores zerados via popup.", "color: red; font-weight: bold;");
+            chrome.storage.local.set({ CLEAR_ALL: false });
+        }
+        
+        if (changes.USE_SHORT_TIMER) {
+            if (changes.USE_SHORT_TIMER.newValue === true) {
+                INACTIVITY_LIMIT = 3 * 60 * 1000;
+                console.log("%c[Zendesk Debug] Timer alterado para 3 MINUTOS.", "color: purple; font-weight: bold;");
+            } else {
+                INACTIVITY_LIMIT = (4 * 60 * 1000) + (30 * 1000);
+                console.log("%c[Zendesk Debug] Timer retornado para 5 MINUTOS.", "color: purple; font-weight: bold;");
+            }
+        }
+    }
+});
 
 // --- INTERFACE ---
-
 function updateAlertUI() {
     const chatsToAlert = Object.keys(chats).filter(id => chats[id].alertShown);
 
@@ -42,12 +70,10 @@ function updateAlertUI() {
             chats[id].isActive = false;
         });
         alertDiv.remove();
-        console.log("[Zendesk Debug] Alertas limpos pelo usuário.");
     };
 }
 
 // --- CORE ---
-
 function getCurrentTicketInfo() {
     const url = window.location.href;
     const ticketMatch = url.match(/\/tickets\/(\d+)/);
@@ -70,28 +96,44 @@ function getCurrentTicketInfo() {
     }
 
     const entityId = activeTab ? activeTab.getAttribute('data-entity-id') : (ticketMatch ? ticketMatch[1] : null);
-
     return entityId ? { id: entityId, protocol: protocolText, name: customerName } : null;
 }
 
+// --- CHECAGEM DE STATUS NO CABEÇALHO ---
+function checkActiveTicketStatus() {
+    const info = getCurrentTicketInfo();
+    // Só prossegue se conseguirmos ver a ID do ticket e se ele estiver sendo monitorado
+    if (!info || !chats[info.id]) return;
 
+    // Busca DIRETAMENTE pela classe oficial de status do Zendesk
+    const statusBadges = document.querySelectorAll('.ticket_status_label');
+    let shouldStopTimer = false;
 
+    for (let badge of statusBadges) {
+        const text = (badge.innerText || badge.textContent || "").trim().toLowerCase();
+        
+        // Verifica se é Resolvido ou Em espera
+        if (text === "resolvido" || text === "em espera") {
+            shouldStopTimer = true;
+            break; // Já achou, não precisa olhar os outros
+        }
+    }
 
-// Esta função verifica se a última mensagem enviada pelo analista é diferente da penúltima.
-// Caso seja diferente, o contador é resetado. Caso seja igual, o contador continua incrementando.
-// Essa verificação booleana evita um bug onde o contador poderia reiniciar indevidamente.
+    // Se achou a badge com o status, encerra o monitoramento
+    if (shouldStopTimer) {
+        console.log(`%c[Zendesk Debug] Ticket ${info.protocol} resolvido/em espera. Timer cancelado.`, "color: #28a745; font-weight: bold;");
+        stopWaitingForCustomer(info.id);
+    }
+}
+
 function startWaitingForCustomer(chatId, protocol, name, currentMsgSignature) {
     if (chats[chatId]) {
-        // SÓ REINICIA se a assinatura da mensagem for REALMENTE diferente
         if (chats[chatId].lastMsgSignature !== currentMsgSignature) {
             chats[chatId].startTime = new Date();
             chats[chatId].lastMsgSignature = currentMsgSignature;
             chats[chatId].alertShown = false;
             chats[chatId].isActive = true;
-            console.log(`%c[Zendesk Debug] TIMER REINICIADO (v1.8): ${protocol} (${name}) - Nova mensagem real detectada.`, "color: #006aff; font-weight: bold;");
-        } else {
-            // Se a assinatura for igual, não faz nada (evita o loop de reset)
-            
+            console.log(`%c[Zendesk Debug] TIMER REINICIADO: ${protocol}`, "color: #006aff; font-weight: bold;");
         }
     } else {
         chats[chatId] = {
@@ -102,21 +144,24 @@ function startWaitingForCustomer(chatId, protocol, name, currentMsgSignature) {
             alertShown: false,
             isActive: true
         };
-        console.log(`%c[Zendesk Debug] MONITOR INICIADO (v1.0): ${protocol} (${name})`, "color: orange; font-weight: bold;");
+        console.log(`%c[Zendesk Debug] MONITOR INICIADO: ${protocol}`, "color: orange; font-weight: bold;");
     }
 }
 
-// Para de observar o chat, e reseta o contador
 function stopWaitingForCustomer(chatId) {
     if (chats[chatId]) {
-        console.log(`%c[ Debug] CLIENTE RESPONDEU: ${chats[chatId].ticketProtocol}. Monitor removido.`, "color: green; font-weight: bold;");
+        console.log(`%c[Zendesk Debug] Monitoramento removido para: ${chats[chatId].ticketProtocol}`, "color: green; font-weight: bold;");
         delete chats[chatId];
         updateAlertUI();
     }
 }
 
-// Loop de Verificação (1s)
+// Verifica o tempo e o status a cada 1 segundo
 setInterval(() => {
+    // 1. Antes de qualquer coisa, verifica se o ticket da tela ativa foi colocado em Espera/Resolvido
+    checkActiveTicketStatus();
+
+    // 2. Roda a contagem do tempo
     const now = new Date();
     let changed = false;
     for (let id in chats) {
@@ -127,28 +172,13 @@ setInterval(() => {
         if (elapsed >= INACTIVITY_LIMIT) {
             chat.alertShown = true;
             changed = true;
-            console.log(`%c[Zendesk ALERTA] ${chat.ticketProtocol} (${chat.customerName}) atingiu 4 min!`, "color: red; font-weight: bold;");
         }
     }
     if (changed) updateAlertUI();
 }, 1000);
 
-// Log de Status Periódico (a cada 10s) para monitoramento no console
-setInterval(() => {
-    const activeChats = Object.values(chats).filter(c => c.isActive && !c.alertShown);
-    if (activeChats.length > 0) {
-        console.log(`--- [Zendesk Status v1.0 - ${new Date().toLocaleTimeString()}] ---`);
-        activeChats.forEach(c => {
-            const secLeft = Math.round((INACTIVITY_LIMIT - (new Date() - c.startTime)) / 1000);
-            console.log(`- ${c.ticketProtocol} (${c.customerName}): ${secLeft}s restantes.`);
-        });
-    }
-}, DEBUG_LOG_INTERVAL);
-
-// --- OBSERVAÇÃO DE MENSAGENS ---
-
+// Observa mensagens novas
 const observer = new MutationObserver((mutations) => {
-    // Filtro rápido: só processa se a mudança for relevante no DOM
     const isRelevant = mutations.some(m => 
         (m.target instanceof HTMLElement && m.target.closest('[data-test-id="omni-log-container"]')) || 
         (m.target instanceof HTMLElement && m.target.closest('[data-test-id="omni-log-comment-item"]'))
@@ -168,8 +198,6 @@ const observer = new MutationObserver((mutations) => {
         const lastMessage = messages[messages.length - 1];
         const isCustomer = lastMessage.querySelector('[type="end-user"]');
         
-        // ASSINATURA DIGITAL: Combina conteúdo, autor e quantidade de mensagens
-        // Isso garante que só mude se a mensagem for REALMENTE nova
         const msgContent = lastMessage.innerText.trim();
         const msgAuthor = isCustomer ? "customer" : "agent";
         const msgSignature = `${msgAuthor}_${msgContent.substring(0, 100)}_${messages.length}`;
@@ -183,23 +211,9 @@ const observer = new MutationObserver((mutations) => {
 });
 
 function init() {
-    console.log("%c[Debug] v1.8 (Anti-Loop) - Iniciada.", "color: white; background: #006aff; padding: 5px;");
-    // Observa o container de logs especificamente se possível, senão o body com filtro
+    console.log("%c[Debug] v1.9 (Auto-Stop Status com ticket_status_label) - Iniciada.", "color: white; background: #006aff; padding: 5px;");
     const logContainer = document.querySelector('[data-test-id="omni-log-container"]') || document.body;
     observer.observe(logContainer, { childList: true, subtree: true, characterData: true });
 }
-
-
-
-// Não consegui fazer isso funcionar
-chrome.storage.local.onChanged.addListener((changes, namespace) => {
-    if (namespace === 'local' && changes.CLEAR_ALL && changes.CLEAR_ALL.newValue === true) {
-        chats = {};
-        updateAlertUI();
-        console.log("%c[ Debug] Todos os monitores zerados via popup.", "color: red; font-weight: bold;");
-        // Resetar a flag no storage para que o comando não seja reexecutado
-        chrome.storage.local.set({ CLEAR_ALL: false });
-    }
-});
 
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();

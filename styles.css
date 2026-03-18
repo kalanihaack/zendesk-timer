@@ -1,7 +1,7 @@
 #zendesk-inactivity-alert {
     position: fixed;
     top: 15px;
-    right: 15px; /* Movido para a direita */
+    right: 15px;
     width: auto;
     max-width: 320px;
     background-color: #ff4d4d;
