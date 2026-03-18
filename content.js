@@ -1,12 +1,27 @@
 let isShortTimerActive = false; 
+const DEBUG_LOG_INTERVAL = 10000; 
 const PROCESS_DELAY = 500; 
 
 let chats = {}; 
 let processTimeout = null; 
 
+function isRushHour() {
+    const now = new Date();
+    const hour = now.getHours(); 
+    
+    const isMorningRush = hour >= 10 && hour < 14;
+    const isEveningRush = hour >= 18 && hour < 22;
+    
+    return isMorningRush || isEveningRush;
+}
+
+function shouldUseShortTimer() {
+    return isShortTimerActive || isRushHour();
+}
+
 chrome.storage.local.get(['USE_SHORT_TIMER'], (result) => {
     isShortTimerActive = !!result.USE_SHORT_TIMER;
-    console.log(`%c[Zendesk Debug] Iniciado. Timer Curto (3+2) Ativado: ${isShortTimerActive}`, "color: purple; font-weight: bold;");
+    console.log(`%c[Zendesk Debug] Iniciado. Toggle Manual: ${isShortTimerActive} | Horário de Pico: ${isRushHour()}`, "color: purple; font-weight: bold;");
 });
 
 chrome.storage.onChanged.addListener((changes, namespace) => {
@@ -21,7 +36,7 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
         
         if (changes.USE_SHORT_TIMER) {
             isShortTimerActive = changes.USE_SHORT_TIMER.newValue === true;
-            console.log(`%c[Zendesk Debug] Toggle alterado. Timer Curto Ativado: ${isShortTimerActive}`, "color: purple; font-weight: bold;");
+            console.log(`%c[Zendesk Debug] Toggle alterado. Manual Ativado: ${isShortTimerActive}`, "color: purple; font-weight: bold;");
         }
     }
 });
@@ -40,10 +55,12 @@ function updateAlertUI() {
     const alertsHtml = chatsToAlert.map(id => {
         const chat = chats[id];
         const isStage1 = chat.stage === 1;
+        const useShort = shouldUseShortTimer();
         
         let stageText = "";
-        if (isShortTimerActive) {
-            stageText = isStage1 ? "1º Alerta (3 min)" : "2º Alerta (2 min)";
+        if (useShort) {
+            const autoText = (isRushHour() && !isShortTimerActive) ? " - Automático" : "";
+            stageText = isStage1 ? `1º Alerta (3 min${autoText})` : `2º Alerta (2 min${autoText})`;
         } else {
             stageText = isStage1 ? "1º Alerta (5 min)" : "2º Alerta (5 min)";
         }
@@ -82,18 +99,13 @@ function updateAlertUI() {
 function getCurrentTicketInfo() {
     const url = window.location.href;
     const ticketMatch = url.match(/\/tickets\/(\d+)/);
-    
     let protocolText = "Ticket";
-    if (ticketMatch && ticketMatch[1]) {
-        protocolText = "#" + ticketMatch[1];
-    }
+    if (ticketMatch && ticketMatch[1]) protocolText = "#" + ticketMatch[1];
 
     const activeTab = document.querySelector('[role="tab"][aria-selected="true"][data-test-id="header-tab"]');
     let customerName = "Cliente";
     
-    if (activeTab) {
-        customerName = activeTab.getAttribute('aria-label') || "Cliente";
-    }
+    if (activeTab) customerName = activeTab.getAttribute('aria-label') || "Cliente";
 
     if (customerName === "Cliente") {
         const headerName = document.querySelector('[data-test-id="ticket-pane-header-name"]');
@@ -125,10 +137,26 @@ function checkActiveTicketStatus() {
     }
 }
 
+function removeClosedChats() {
+    for (let id in chats) {
+        const tabExists = document.querySelector(`[role="tab"][data-entity-id="${id}"]`);
+        
+        if (!tabExists) {
+            console.log(`%c[Zendesk Debug] Aba do ticket ${chats[id].ticketProtocol} fechada. Limpando timer da memória.`, "color: #ff9800; font-weight: bold;");
+            delete chats[id];
+            updateAlertUI(); 
+        }
+    }
+}
+
 function startWaitingForCustomer(chatId, protocol, name, currentMsgSignature) {
     if (chats[chatId]) {
         if (chats[chatId].lastMsgSignature !== currentMsgSignature) {
-            chats[chatId].stage = (chats[chatId].stage || 1) + 1; // Avança estágio
+            
+            if (chats[chatId].alertShown === true || chats[chatId].isActive === false) {
+                chats[chatId].stage = chats[chatId].stage === 1 ? 2 : 1;
+            }
+            
             chats[chatId].startTime = new Date();
             chats[chatId].lastMsgSignature = currentMsgSignature;
             chats[chatId].alertShown = false;
@@ -158,6 +186,7 @@ function stopWaitingForCustomer(chatId) {
 }
 
 setInterval(() => {
+    removeClosedChats();
     checkActiveTicketStatus();
 
     const now = new Date();
@@ -169,9 +198,8 @@ setInterval(() => {
 
         const elapsed = now - chat.startTime;
         
-        // LÓGICA DE TEMPO: Toggle ATIVADO (3+2) ou Toggle DESATIVADO (5+5)
         let limit;
-        if (isShortTimerActive) {
+        if (shouldUseShortTimer()) {
             limit = chat.stage === 1 ? (3 * 60 * 1000) : (2 * 60 * 1000); 
         } else {
             limit = 5 * 60 * 1000; 
@@ -188,11 +216,10 @@ setInterval(() => {
 setInterval(() => {
     const activeChats = Object.values(chats).filter(c => c.isActive && !c.alertShown);
     if (activeChats.length > 0) {
-        console.log(`--- [Zendesk Status v2.1 - ${new Date().toLocaleTimeString()}] ---`);
+        console.log(`--- [Zendesk Status v2.4 - ${new Date().toLocaleTimeString()}] ---`);
         activeChats.forEach(c => {
-            
             let limit;
-            if (isShortTimerActive) {
+            if (shouldUseShortTimer()) {
                 limit = c.stage === 1 ? (3 * 60 * 1000) : (2 * 60 * 1000); 
             } else {
                 limit = 5 * 60 * 1000; 
@@ -237,7 +264,7 @@ const observer = new MutationObserver((mutations) => {
 });
 
 function init() {
-    console.log("%c[Debug] v2.1 (Toggle + Estágios Inteligentes + Logs) - Iniciada.", "color: white; background: #006aff; padding: 5px;");
+    console.log("%c[Debug] v2.4 (Limpeza de Abas Fechadas) - Iniciada.", "color: white; background: #006aff; padding: 5px;");
     const logContainer = document.querySelector('[data-test-id="omni-log-container"]') || document.body;
     observer.observe(logContainer, { childList: true, subtree: true, characterData: true });
 }
