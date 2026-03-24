@@ -1,5 +1,20 @@
+function getInactivityLimit() {
+    const now = new Date();
+    const hours = now.getHours();
+    const minutes = now.getMinutes();
 
-const INACTIVITY_LIMIT = (4 * 60 * 1000) + (30 * 1000); // 4 minutos e 30 segundos
+    const currentTime = hours * 60 + minutes;
+
+    const isPeakTime =
+        (currentTime >= (10 * 60) && currentTime <= (14 * 60)) ||
+        (currentTime >= (18 * 60) && currentTime <= (22 * 60));
+
+    if (isPeakTime) {
+        return 2 * 60 * 1000; // 2 minutos
+    }
+
+    return (4 * 60 * 1000) + (30 * 1000); // 4m30s
+}
 const DEBUG_LOG_INTERVAL = 10000; 
 const PROCESS_DELAY = 500; // Delay de 0.5 segundos para a pagina carregar
 
@@ -124,7 +139,7 @@ setInterval(() => {
         if (!chat.isActive || chat.alertShown) continue;
 
         const elapsed = now - chat.startTime;
-        if (elapsed >= INACTIVITY_LIMIT) {
+        if (elapsed >= getInactivityLimit()) {
             chat.alertShown = true;
             changed = true;
             console.log(`%c[Zendesk ALERTA] ${chat.ticketProtocol} (${chat.customerName}) atingiu 4 min!`, "color: red; font-weight: bold;");
@@ -139,7 +154,7 @@ setInterval(() => {
     if (activeChats.length > 0) {
         console.log(`--- [Zendesk Status v1.0 - ${new Date().toLocaleTimeString()}] ---`);
         activeChats.forEach(c => {
-            const secLeft = Math.round((INACTIVITY_LIMIT - (new Date() - c.startTime)) / 1000);
+            const secLeft = Math.round((getInactivityLimit() - (new Date() - c.startTime)) / 1000);
             console.log(`- ${c.ticketProtocol} (${c.customerName}): ${secLeft}s restantes.`);
         });
     }
