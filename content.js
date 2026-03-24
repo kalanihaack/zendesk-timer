@@ -1,4 +1,20 @@
-let isShortTimerActive = false; 
+function getInactivityLimit() {
+    const now = new Date();
+    const hours = now.getHours();
+    const minutes = now.getMinutes();
+
+    const currentTime = hours * 60 + minutes;
+
+    const isPeakTime =
+        (currentTime >= (10 * 60) && currentTime <= (14 * 60)) ||
+        (currentTime >= (18 * 60) && currentTime <= (22 * 60));
+
+    if (isPeakTime) {
+        return 2 * 60 * 1000; // 2 minutos
+    }
+
+    return (4 * 60 * 1000) + (30 * 1000); // 4m30s
+}
 const DEBUG_LOG_INTERVAL = 10000; 
 const PROCESS_DELAY = 500; 
 
@@ -197,15 +213,7 @@ setInterval(() => {
         if (!chat.isActive || chat.alertShown) continue;
 
         const elapsed = now - chat.startTime;
-        
-        let limit;
-        if (shouldUseShortTimer()) {
-            limit = chat.stage === 1 ? (3 * 60 * 1000) : (2 * 60 * 1000); 
-        } else {
-            limit = 5 * 60 * 1000; 
-        }
-
-        if (elapsed >= limit) {
+        if (elapsed >= getInactivityLimit()) {
             chat.alertShown = true;
             changed = true;
         }
@@ -218,15 +226,8 @@ setInterval(() => {
     if (activeChats.length > 0) {
         console.log(`--- [Zendesk Status v2.4 - ${new Date().toLocaleTimeString()}] ---`);
         activeChats.forEach(c => {
-            let limit;
-            if (shouldUseShortTimer()) {
-                limit = c.stage === 1 ? (3 * 60 * 1000) : (2 * 60 * 1000); 
-            } else {
-                limit = 5 * 60 * 1000; 
-            }
-
-            const secLeft = Math.round((limit - (new Date() - c.startTime)) / 1000);
-            console.log(`- ${c.ticketProtocol} (${c.customerName}) [Estágio ${c.stage}]: ${secLeft}s restantes.`);
+            const secLeft = Math.round((getInactivityLimit() - (new Date() - c.startTime)) / 1000);
+            console.log(`- ${c.ticketProtocol} (${c.customerName}): ${secLeft}s restantes.`);
         });
     }
 }, DEBUG_LOG_INTERVAL);
